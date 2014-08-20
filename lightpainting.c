@@ -32,22 +32,23 @@
 #define RESET_PORT      PORTF
 #define RESET_PIN       4
 
-#define printf(x...)
-#define puts(x...)
+//~ #define printf(x...)
+//~ #define puts(x...)
 
 struct buttondesc
 {
     volatile uint8_t *ddrReg;
+    volatile uint8_t *portReg;
     volatile uint8_t *pinReg;
     uint8_t pin;
 };
 
-static const struct buttondesc buttons[4]=
+static const struct buttondesc buttons[]=
 {
-    { &DDRB, &PINB, 4 },
-    { &DDRE, &PINE, 6 },
-    { &DDRD, &PIND, 0 },
-    { &DDRD, &PIND, 4 },
+    { &DDRB, &PORTB, &PINB, 4 },
+    { &DDRE, &PORTE, &PINE, 6 },
+    { &DDRD, &PORTD, &PIND, 4 },
+    { &DDRD, &PORTD, &PIND, 0 },
 };
 
 void buttonSetup(void)
@@ -55,7 +56,7 @@ void buttonSetup(void)
     for(int i= 0; i<sizeof(buttons)/sizeof(buttons[0]); ++i)
     {
         *buttons[i].ddrReg &= ~(1<<buttons[i].pin);
-        *buttons[i].pinReg |= 1<<buttons[i].pin;
+        *buttons[i].portReg |= 1<<buttons[i].pin;
     }
 }
 
@@ -142,8 +143,9 @@ void hsv2rgb(int h, int s, int v, uint16_t *dest)
     int offset;   // between entries
     uint32_t r, g, b;
     
-    if(v>HSV_MAX) v= HSV_MAX;      // Helligkeit innerhalb max. Werte halten
-    else if(v<0) v= 0;
+    //~ if(v>HSV_MAX) v= HSV_MAX;      // Helligkeit innerhalb max. Werte halten
+    //~ else if(v<0) v= 0;
+    CLAMP(v, 0, HSV_MAX*2);
     h&= HSV_MAX;                   // modulo mit max. Wert
     s= (HSV_MAX+1)-s;              // Saturation invertieren
     index= h / ((HSV_MAX+1)/6);    // index
@@ -174,7 +176,9 @@ void setLEDsHSV(uint16_t h, uint16_t s, uint16_t v)
     setLEDs(rgb[0], rgb[1], rgb[2]);
 }
 
-static int32_t h[4], s[4], v[4]= { HSV_MAX, HSV_MAX, HSV_MAX };
+static int32_t h[4], 
+               s[4]= { HSV_MAX/2, HSV_MAX/2, HSV_MAX/2, HSV_MAX/2 },
+               v[4]= { HSV_MAX, HSV_MAX, HSV_MAX, HSV_MAX };
 
 void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX, uint16_t currentY, int16_t relX, int16_t relY, 
                 uint16_t pressure, uint8_t buttons, uint8_t isBegin, uint8_t isEnd)
@@ -183,7 +187,7 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
                           BOUNDARY2= (TOUCHPAD_XMAX-TOUCHPAD_XMIN)*2/3+TOUCHPAD_XMIN;
     
     
-    if(isEnd)
+    if(isEnd && !buttons)
     {
         setLEDs(0,0,0);
         return; ////////////////////
@@ -196,13 +200,13 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
     //~ }
     
     int button= 0;
-    //~ while(! (buttons & (1<<button)) )
-        //~ ++button;
+    while(buttons && !(buttons&(1<<button)) )
+        ++button;
     
     uint16_t rgb[3];
     printf("relY: %d\n", relY);
 
-    int16_t arelY= relY;
+    int16_t arelY= relY; //*2;
     //~ const int16_t scaling[][2]= { { 20, 2 }, { 40, 4 }, { 80, 6 }, { 160, 8 }, { 320, 20 } };
     //~ for(int8_t i= sizeof(scaling)/sizeof(scaling[0])-1; i>=0; --i)
         //~ if(abs(relY)>scaling[i][0]) { arelY*= scaling[i][1]; break; }
@@ -232,6 +236,13 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
     setLEDsHSV(h[button], s[button], v[button]);
 }
 
+void statusLED(bool on)
+{
+    if(on)
+        PORTB&= ~(1<<0);
+    else
+        PORTB|= 1<<0;
+}
 
 void setup(void)
 {
@@ -243,6 +254,10 @@ void setup(void)
     
     RESET_PINREG|= (1<<RESET_PIN);
     RESET_DDR|= (1<<RESET_PIN);
+    
+    // status LED
+    DDRB|= (1<<0);
+    statusLED(false);
 
     dragAction((TOUCHPAD_XMIN-TOUCHPAD_XMIN)/2, (TOUCHPAD_YMIN-TOUCHPAD_YMIN)/2, (TOUCHPAD_XMIN-TOUCHPAD_XMIN)/2, (TOUCHPAD_YMIN-TOUCHPAD_YMIN)/2, 
                 0, 0, 100, 
@@ -256,6 +271,8 @@ void setup(void)
 void tick(void)
 {
     //~ setLEDs(RGB_MAX,RGB_MAX,RGB_MAX);
+    //~ setLEDs(RGB_MAX/2,RGB_MAX/2,RGB_MAX/2);
+    //~ setLEDs(0,0,0);
     //~ return; ///////////////////////////////////
     
     static uint8_t wasDown;
@@ -263,24 +280,27 @@ void tick(void)
     static uint16_t lastX, lastY;
     static uint8_t lastButtonState;
     
-    uint8_t buttons= 0; //buttonRead();
-    //~ if(buttons!=lastButtonState)
-    //~ {
-        //~ printf("buttons: %d\n", buttons);
-        //~ if(buttons)
-        //~ {
-            //~ int button= 0;
-            //~ while(! (buttons & (1<<button)) )
-                //~ ++button;
+    uint8_t buttons= buttonRead();
+    if(buttons!=lastButtonState)
+    {
+        printf("buttons: %d\n", buttons);
+        if(buttons)
+        {
+            int button= 0;
+            while(! (buttons & (1<<button)) )
+                ++button;
             //~ printf("button %d pressed\n", button);
             //~ printf("h: %ld s: %ld v: %ld\n", h[button], s[button], v[button]);
-            //~ setLEDsHSV(h[button], s[button], v[button]);
-        //~ }
-        //~ else
-            //~ puts("buttons off");
-            //~ setLEDs(0, 0, 0);
-        //~ lastButtonState= buttons;
-    //~ }
+            setLEDsHSV(h[button], s[button], v[button]);
+        }
+        else
+        {
+            puts("buttons off");
+            setLEDs(0, 0, 0);
+        }
+        lastButtonState= buttons;
+    }
+        
     
     uint8_t adbData[8];
     struct adbAbsMode absData;
@@ -315,9 +335,11 @@ void tick(void)
     }
 }
 
-void ProcessCDCLine(const char *line)
+bool ProcessCDCLine(const char *line)
 {
-    //~ puts(line);
+    statusLED(true);
+    Delay_MS(100);
+    statusLED(false);
     if(!strcmp(line, "R"))
         setLEDs(RGB_MAX, 0, 0);
     else if(!strcmp(line, "G"))
@@ -328,8 +350,12 @@ void ProcessCDCLine(const char *line)
         setLEDs(RGB_MAX, RGB_MAX, RGB_MAX);
     else if(!strcmp(line, "OFF"))
         setLEDs(0, 0, 0);
-    else if(!strcmp(line, "reset"))
+    else if(!strcmp(line, "reset") || !strcmp(line, "r"))
         RESET_PORT&= ~(1<<RESET_PIN);
+    else
+        return false;
+    
+    return true;
 }
 
 void ProcessCDCChar(uint8_t c)
@@ -338,16 +364,19 @@ void ProcessCDCChar(uint8_t c)
     static char linebuffer[LINE_MAX+1];
     static int offset= 0;
     
-    if(c=='\n')
+    if(c=='\n' || c=='\r')
     {
         linebuffer[offset&(LINE_MAX-1)]= 0;
-        ProcessCDCLine(linebuffer);
+        if(strlen(linebuffer))
+        {
+            if(!ProcessCDCLine(linebuffer))
+                printf("invalid command '%s'\n", linebuffer);
+            else
+                printf("'%s' OK\n", linebuffer);
+        }
         offset= 0;
     }
-    else if(c!='\r')
-    {
+    else
         linebuffer[(offset++)&(LINE_MAX-1)]= c;
-        setLEDs(0, 0, 0);
-    }
 }
 

@@ -78,12 +78,13 @@ FILE USBSerialStream;
 int main(void)
 {
 	SetupHardware();
-    setup();
 
 	/* Create a regular character stream for the interface so that it can be used with the stdio.h functions */
 	CDC_Device_CreateStream(&VirtualSerial_CDC_Interface, &USBSerialStream);
     
     stdout= &USBSerialStream;
+
+    setup();
 
 	GlobalInterruptEnable();
 
@@ -92,7 +93,6 @@ int main(void)
 		/* Must throw away unused bytes from the host, or it will lock up while waiting for the device */
 		int16_t character= CDC_Device_ReceiveByte(&VirtualSerial_CDC_Interface);
 		if(character>=0) ProcessCDCChar(character);
-
 
 		CDC_Device_USBTask(&VirtualSerial_CDC_Interface);
 		USB_USBTask();

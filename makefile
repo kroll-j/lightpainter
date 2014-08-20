@@ -23,11 +23,13 @@ LUFA_PATH    = $(HOME)/src/lufa-LUFA-140302/LUFA
 CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/ -I. -Ilufa
 LD_FLAGS     =
 
-SERIAL=/dev/ttyACM0
+SERIAL:=$(wildcard /dev/ttyACM?)
 upload: all
 	echo reset > $(SERIAL); sleep .5
 	while ! stat $(SERIAL) >/dev/null ; do sleep .5; done
-	-avrdude -p m32u4 -c avr109 -P $(SERIAL) -U flash:w:$(TARGET).hex & (sleep 10; killall avrdude)
+	-avrdude -p m32u4 -c avr109 -P $(SERIAL) -U flash:w:$(TARGET).hex
+#	& (sleep 5; killall avrdude)
+	-sleep 1; gtkterm -p $(wildcard /dev/ttyACM?) -s 115200
 
 # Default target
 all:
