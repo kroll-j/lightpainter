@@ -24,10 +24,10 @@ CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/ -I. -Ilufa
 LD_FLAGS     =
 
 upload: all
-	(echo; echo reset) > $(shell echo /dev/ttyACM?); sleep 1
+	(echo; echo reset) > $(shell echo /dev/ttyACM?); sleep 2
 	#~ while ! stat $(SERIAL) >/dev/null ; do sleep .5; done
 	-avrdude -p m32u4 -c avr109 -P $(shell echo /dev/ttyACM?) -U flash:w:$(TARGET).hex & (sleep 6; killall avrdude)
-	-sleep 1; gtkterm -p $(shell echo /dev/ttyACM?) -s 115200
+	-sleep 2; gtkterm -p $(shell echo /dev/ttyACM?) -s 115200
 
 # Default target
 all:

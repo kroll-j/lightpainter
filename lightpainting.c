@@ -138,6 +138,7 @@ void transitionRemove(uint8_t preset)
         }
     }
     activeTransitions.offset= 0;
+    activeTransitions.index= 0;
     sei();
 }
 
