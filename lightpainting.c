@@ -33,6 +33,7 @@
 #define RESET_PIN       4
 
 #define NBUTTONS        4
+#define NPRESETS        NBUTTONS
 
 #define TRANSITION_BITS 14
 #define TRANSITION_MAX  ((1<<TRANSITION_BITS)-1)
@@ -42,6 +43,10 @@
 
 //~ #define printf(x...)
 //~ #define puts(x...)
+
+void setLEDs(int16_t r, int16_t g, int16_t b);
+void setLEDsHSV(uint16_t h, uint16_t s, uint16_t v);
+
 
 struct buttondesc
 {
@@ -59,13 +64,13 @@ static const struct buttondesc buttons[NBUTTONS]=
     { &DDRD, &PORTD, &PIND, 0 },
 };
 
-struct preset
+struct hsv
 {
     int32_t h, s, v;
 };
 
 // color presets for each button
-struct preset presets[NBUTTONS]=
+struct hsv presets[NPRESETS]=
 {
     { HSV_MAX*0/4, HSV_MAX, HSV_MAX },
     { HSV_MAX*1/4, HSV_MAX, HSV_MAX },
@@ -78,7 +83,7 @@ struct transitionSetting
 {
     uint16_t velocity;
 };
-volatile struct transitionSetting transitionSettings[NBUTTONS*NBUTTONS]=
+volatile struct transitionSetting transitionSettings[NPRESETS*NPRESETS]=
 {
     { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
     { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
@@ -86,35 +91,42 @@ volatile struct transitionSetting transitionSettings[NBUTTONS*NBUTTONS]=
     { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
 };
 
+// get index into transitionSettings for 2 presets
+uint8_t transitionIndex(uint8_t presetA, uint8_t presetB)
+{
+    uint8_t a= presetA&(NPRESETS-1), b= presetB&(NPRESETS-1);
+    return min(a,b)*NPRESETS + max(a,b);
+}
+
 // currently active transitions
 volatile struct
 {
-    uint8_t presetIndices[NBUTTONS];    // presets to lerp
+    uint8_t presetIndices[NPRESETS];    // presets to lerp
     uint8_t count;                      // number of presets
     uint8_t index;                      // current index into presetIndices
     uint16_t offset;                    // offset between two presets
 } activeTransitions;
 
-uint8_t getTransitionIndex(uint8_t buttonA, uint8_t buttonB)
-{
-    uint8_t a= buttonA&(NBUTTONS-1), b= buttonB&(NBUTTONS-1);
-    return min(a,b)*NBUTTONS + max(a,b);
-}
-
 void transitionReset(void)
 {
+    cli();
     activeTransitions.count= activeTransitions.index= activeTransitions.offset= 0;
+    sei();
 }
 
 void transitionAdd(uint8_t preset)
 {
-    activeTransitions.count%= NBUTTONS;
+    cli();
+    activeTransitions.count%= NPRESETS;
     activeTransitions.presetIndices[activeTransitions.count]= preset;
     activeTransitions.count++;
+    activeTransitions.offset= 0;
+    sei();
 }
 
 void transitionRemove(uint8_t preset)
 {
+    cli();
     for(int i= 0; i<activeTransitions.count; ++i)
     {
         if(activeTransitions.presetIndices[i]==preset)
@@ -125,6 +137,8 @@ void transitionRemove(uint8_t preset)
             break;
         }
     }
+    activeTransitions.offset= 0;
+    sei();
 }
 
 void buttonSetup(void)
@@ -176,9 +190,36 @@ void statusLED(bool on)
         PORTB|= 1<<0;
 }
 
+#define ILERP(a, b, offset, bits) ( (a) + ( ((b)-(a)) * (offset) >> (bits) ) )
+
+uint16_t hueLerp(int32_t a, int32_t b, uint16_t offset)
+{
+    return ILERP(a, b, offset, TRANSITION_BITS);
+}
+
+// XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+struct hsv col;
+
 // called every 10 timer ticks (~100x per sec)
 void lerpTransitions(void)
 {
+    if(activeTransitions.count<2)
+        return;
+    
+    uint8_t presetA= activeTransitions.presetIndices[activeTransitions.index], 
+            presetB= activeTransitions.presetIndices[(activeTransitions.index+1)%activeTransitions.count];
+    uint8_t transIdx= transitionIndex(presetA, presetB);
+    col.h= hueLerp( presets[presetA].h, presets[presetB].h, activeTransitions.offset );
+    col.s= ILERP( presets[presetA].s, presets[presetB].s, activeTransitions.offset, TRANSITION_BITS );
+    col.v= ILERP( presets[presetA].v, presets[presetB].v, activeTransitions.offset, TRANSITION_BITS );
+    setLEDsHSV((uint16_t)col.h, (uint16_t)col.s, (uint16_t)col.v);
+
+    activeTransitions.offset+= transitionSettings[transIdx].velocity;
+    if(activeTransitions.offset>TRANSITION_MAX)
+    {
+        activeTransitions.offset-= 1<<TRANSITION_BITS;
+        activeTransitions.index= (++activeTransitions.index)%activeTransitions.count;
+    }
 }
 
 ISR(TIMER1_OVF_vect)
@@ -364,6 +405,44 @@ void setup(void)
                 0/*buttons*/, 0/*isBegin*/, 1/*isEnd*/);
 }
 
+
+void buttonChange(uint8_t lastButtons, uint8_t buttons)
+{
+    uint8_t buttonsPressed= (lastButtons ^ buttons) & buttons;
+    uint8_t buttonsReleased= (lastButtons ^ buttons) & lastButtons;
+    uint8_t buttonsDown= 0;
+    uint8_t singleButton;
+    printf("buttons pressed: ");
+    for(int i= 0; i<NBUTTONS; ++i)
+    {
+        if(buttons & (1<<i))
+            buttonsDown++,
+            singleButton= i;
+        if(buttonsPressed & (1<<i))
+        {
+            transitionAdd(i);
+            printf("%d ", i);
+        }
+    }
+    if(buttonsDown==1)
+        setLEDsHSV(presets[singleButton].h, presets[singleButton].s, presets[singleButton].v);
+    else if(!buttonsDown)
+        setLEDs(0, 0, 0),
+        transitionReset();
+    puts("");
+    printf("buttons released: ");
+    for(int i= 0; i<NBUTTONS; ++i)
+    {
+        if(buttonsReleased & (1<<i))
+        {
+            transitionRemove(i);
+            printf("%d ", i);
+        }
+    }
+    puts("");
+}
+
+
 void tick(void)
 {
     //~ setLEDs(RGB_MAX,RGB_MAX,RGB_MAX);
@@ -376,25 +455,31 @@ void tick(void)
     static uint16_t lastX, lastY;
     static uint8_t lastButtonState;
     
+    //~ if(activeTransitions.count>1)
+    //~ {
+        //~ printf("TRANSITIONS:\n  count: %d index: %d offset: %d\n", activeTransitions.count, activeTransitions.index, activeTransitions.offset);
+        //~ printf("col: %ld\n", col.h);
+    //~ }
+    
     uint8_t buttons= buttonRead();
     if(buttons!=lastButtonState)
     {
-        if(buttons)
-        {
-            uint8_t button= extractSingleButton(buttons);
-            if(button)
-            {
-                printf("button %d pressed\n", button);
-                setLEDsHSV(presets[button-1].h, presets[button-1].s, presets[button-1].v);
-            }
-            else
-                printf("multiple buttons\n");
-        }
-        else
-        {
-            puts("buttons off");
-            setLEDs(0, 0, 0);
-        }
+        //~ if(buttons)
+        //~ {
+            //~ uint8_t button= extractSingleButton(buttons);
+            //~ if(button)
+            //~ {
+                //~ printf("button %d pressed\n", button);
+                //~ setLEDsHSV(presets[button-1].h, presets[button-1].s, presets[button-1].v);
+            //~ }
+        //~ }
+        //~ else
+        //~ {
+            //~ puts("buttons off");
+            //~ setLEDs(0, 0, 0);
+        //~ }
+        buttonChange(lastButtonState, buttons);
+        
         lastButtonState= buttons;
     }
         
