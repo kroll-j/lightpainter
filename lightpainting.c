@@ -35,8 +35,8 @@
 #define NBUTTONS        4
 #define NPRESETS        NBUTTONS
 
-#define TRANSITION_BITS 14
-#define TRANSITION_MAX  ((1<<TRANSITION_BITS)-1)
+#define TRANSITION_BITS 15
+#define TRANSITION_MAX  (((uint16_t)1<<TRANSITION_BITS)-1)
 
 #define min(a,b) ((a)<(b)? (a): (b))
 #define max(a,b) ((a)>(b)? (a): (b))
@@ -85,10 +85,10 @@ struct transitionSetting
 };
 volatile struct transitionSetting transitionSettings[NPRESETS*NPRESETS]=
 {
-    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
-    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
-    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
-    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
+    { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, 
+    { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, 
+    { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, 
+    { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, { TRANSITION_MAX/25 }, 
 };
 
 // get index into transitionSettings for 2 presets
@@ -172,14 +172,14 @@ void touchpadInitADB(void)
 {
 	uint8_t adbData[8];
     
-    // Auf Absolutmodus umschalten
+    // switch to absolute mode
     adbData[0] = 0b01100011;    // enabled, device addr 3
-    adbData[1] = 4; //CDM Modus
+    adbData[1] = 4; //CDM mode
     adbExecuteCommand(COM_LISTEN3, adbData, 2);
 
-    adbExecuteCommand(COM_TALK1, adbData, 0); // Werte holen
+    adbExecuteCommand(COM_TALK1, adbData, 0); // get original values
 
-    adbData[6] = 0x00; //Absolutmodus
+    adbData[6] = 0x00; //set absolute mode
     adbExecuteCommand(COM_LISTEN1, adbData, 7);
 }
 
@@ -203,9 +203,6 @@ uint16_t hueLerp(int32_t a, int32_t b, uint16_t offset)
     return ILERP(a, b, offset, TRANSITION_BITS);
 }
 
-// XXXXXXXXXXXXXXXXXXXXXXXXXXXX
-struct hsv col;
-
 // called every 10 timer ticks (~100x per sec)
 void lerpTransitions(void)
 {
@@ -215,6 +212,7 @@ void lerpTransitions(void)
     uint8_t presetA= activeTransitions.presetIndices[activeTransitions.index], 
             presetB= activeTransitions.presetIndices[(activeTransitions.index+1)%activeTransitions.count];
     uint8_t transIdx= transitionIndex(presetA, presetB);
+    struct hsv col;
     col.h= hueLerp( presets[presetA].h, presets[presetB].h, activeTransitions.offset );
     col.s= ILERP( presets[presetA].s, presets[presetB].s, activeTransitions.offset, TRANSITION_BITS );
     col.v= ILERP( presets[presetA].v, presets[presetB].v, activeTransitions.offset, TRANSITION_BITS );
@@ -290,13 +288,11 @@ void hsv2rgb(int h, int s, int v, uint16_t *dest)
     int offset;   // between entries
     uint32_t r, g, b;
     
-    //~ if(v>HSV_MAX) v= HSV_MAX;      // Helligkeit innerhalb max. Werte halten
-    //~ else if(v<0) v= 0;
     CLAMP(v, 0, HSV_MAX);
-    h&= HSV_MAX;                   // modulo mit max. Wert
-    s= (HSV_MAX+1)-s;              // Saturation invertieren
-    index= h / ((HSV_MAX+1)/6);    // index
-    offset= h % ((HSV_MAX+1)/6);   // und Abstand berechnen
+    h&= HSV_MAX;                   // modulo with max value
+    s= (HSV_MAX+1)-s;              // invert saturation
+    index= h / ((HSV_MAX+1)/6);    // calculate table index
+    offset= h % ((HSV_MAX+1)/6);   // and lerp offset
     
     // hue
     r= interp[index].r + (int32_t)(interp[index+1].r-interp[index].r)*offset/(HSV_MAX/6);
@@ -333,7 +329,15 @@ uint8_t extractSingleButton(uint8_t mask)
     return button+1;
 }
 
+uint8_t countBits(uint8_t mask)
+{
+    uint8_t ret= 0;
+    for(; mask; mask>>= 1)
+        if(mask&1) ++ret;
+    return ret;
+}
 
+// touchpad finger movement
 void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX, uint16_t currentY, int16_t relX, int16_t relY, 
                 uint16_t pressure, uint8_t buttons, uint8_t isBegin, uint8_t isEnd)
 {
@@ -347,15 +351,26 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
         return;
     }
     
-    uint8_t button= extractSingleButton(buttons);
+    if(activeTransitions.count==2)
+    {
+        uint8_t transIdx= activeTransitions.index;
+        uint8_t a= activeTransitions.presetIndices[transIdx], b= activeTransitions.presetIndices[(transIdx+1)%activeTransitions.count];
+        uint8_t settingIdx= transitionIndex(a, b);
+        int16_t vel= transitionSettings[settingIdx].velocity + (relY>>1);
+        CLAMP(vel, 0, TRANSITION_MAX);
+        transitionSettings[settingIdx].velocity= vel;
+        //~ printf("transition: %d -> %d setting idx %d vel %d\n", a, b, settingIdx, transitionSettings[settingIdx].velocity);
+        return;
+    }
     
     static int32_t lh, ls, lv;
+    uint8_t button= extractSingleButton(buttons);
     if(button)
         lh= presets[button-1].h,
         ls= presets[button-1].s,
         lv= presets[button-1].v;
 
-    int16_t arelY= relY; //*2;
+    int16_t arelY= relY;
     //~ const int16_t scaling[][2]= { { 20, 2 }, { 40, 4 }, { 80, 6 }, { 160, 8 }, { 320, 20 } };
     //~ for(int8_t i= sizeof(scaling)/sizeof(scaling[0])-1; i>=0; --i)
         //~ if(abs(relY)>scaling[i][0]) { arelY*= scaling[i][1]; break; }
@@ -387,6 +402,7 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
     setLEDsHSV(lh, ls, lv);
 }
 
+// app setup
 void setup(void)
 {
     touchpadTimerSetup();
@@ -412,40 +428,28 @@ void setup(void)
 }
 
 
+// called when button state has changed
 void buttonChange(uint8_t lastButtons, uint8_t buttons)
 {
     uint8_t buttonsPressed= (lastButtons ^ buttons) & buttons;
     uint8_t buttonsReleased= (lastButtons ^ buttons) & lastButtons;
     uint8_t buttonsDown= 0;
     uint8_t singleButton;
-    printf("buttons pressed: ");
     for(int i= 0; i<NBUTTONS; ++i)
     {
         if(buttons & (1<<i))
             buttonsDown++,
             singleButton= i;
         if(buttonsPressed & (1<<i))
-        {
             transitionAdd(i);
-            printf("%d ", i);
-        }
+        if(buttonsReleased & (1<<i))
+            transitionRemove(i);
     }
     if(buttonsDown==1)
         setLEDsHSV(presets[singleButton].h, presets[singleButton].s, presets[singleButton].v);
     else if(!buttonsDown)
         setLEDs(0, 0, 0),
         transitionReset();
-    puts("");
-    printf("buttons released: ");
-    for(int i= 0; i<NBUTTONS; ++i)
-    {
-        if(buttonsReleased & (1<<i))
-        {
-            transitionRemove(i);
-            printf("%d ", i);
-        }
-    }
-    puts("");
 }
 
 
@@ -461,29 +465,9 @@ void tick(void)
     static uint16_t lastX, lastY;
     static uint8_t lastButtonState;
     
-    //~ if(activeTransitions.count>1)
-    //~ {
-        //~ printf("TRANSITIONS:\n  count: %d index: %d offset: %d\n", activeTransitions.count, activeTransitions.index, activeTransitions.offset);
-        //~ printf("col: %ld\n", col.h);
-    //~ }
-    
     uint8_t buttons= buttonRead();
     if(buttons!=lastButtonState)
     {
-        //~ if(buttons)
-        //~ {
-            //~ uint8_t button= extractSingleButton(buttons);
-            //~ if(button)
-            //~ {
-                //~ printf("button %d pressed\n", button);
-                //~ setLEDsHSV(presets[button-1].h, presets[button-1].s, presets[button-1].v);
-            //~ }
-        //~ }
-        //~ else
-        //~ {
-            //~ puts("buttons off");
-            //~ setLEDs(0, 0, 0);
-        //~ }
         buttonChange(lastButtonState, buttons);
         
         lastButtonState= buttons;
@@ -505,9 +489,11 @@ void tick(void)
                 if(!wasDown)
                     motionBeginX= absData.xpos,
                     motionBeginY= absData.ypos;
+                cli();
                 dragAction(motionBeginX, motionBeginY, absData.xpos, absData.ypos, 
                             (wasDown? absData.xpos-lastX: 0), (wasDown? absData.ypos-lastY: 0), absData.pressure, 
                             buttons, !wasDown/*isBegin*/, 0/*isEnd*/);
+                sei();
                 wasDown= 1;
                 lastX= absData.xpos;
                 lastY= absData.ypos;
@@ -515,8 +501,12 @@ void tick(void)
             else
             {
                 if(wasDown)
+                {
+                    cli();
                     dragAction(motionBeginX, motionBeginY, lastX, lastY, 0, 0, 0, 
                                 buttons/*buttons*/, 0/*isBegin*/, 1/*isEnd*/);
+                    sei();
+                }
                 wasDown= 0;
             }
         }
