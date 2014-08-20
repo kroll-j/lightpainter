@@ -85,10 +85,10 @@ struct transitionSetting
 };
 volatile struct transitionSetting transitionSettings[NPRESETS*NPRESETS]=
 {
-    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
-    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
-    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
-    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
+    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
+    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
+    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
+    { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, { TRANSITION_MAX/50 }, 
 };
 
 // get index into transitionSettings for 2 presets
@@ -194,6 +194,11 @@ void statusLED(bool on)
 
 uint16_t hueLerp(int32_t a, int32_t b, uint16_t offset)
 {
+    if(abs(b-a) > (1<<(TRANSITION_BITS-1)))
+    {
+        if(a<b) a+= (1<<TRANSITION_BITS);
+        else b+= (1<<TRANSITION_BITS);
+    }
     return ILERP(a, b, offset, TRANSITION_BITS);
 }
 
