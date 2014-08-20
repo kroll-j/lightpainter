@@ -176,6 +176,16 @@ void setLEDsHSV(uint16_t h, uint16_t s, uint16_t v)
     setLEDs(rgb[0], rgb[1], rgb[2]);
 }
 
+uint8_t extractSingleButton(uint8_t mask)
+{
+    int button= 0;
+    while(mask && !(mask&(1<<button)) )
+        ++button;
+    if(mask & ~(1<<button))
+        return 0;
+    return button+1;
+}
+
 static int32_t h[4], 
                s[4]= { HSV_MAX/2, HSV_MAX/2, HSV_MAX/2, HSV_MAX/2 },
                v[4]= { HSV_MAX, HSV_MAX, HSV_MAX, HSV_MAX };
@@ -193,15 +203,13 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
         return; ////////////////////
     }
     
-    int button= 0;
-    while(buttons && !(buttons&(1<<button)) )
-        ++button;
+    uint8_t button= extractSingleButton(buttons);
     
     static int32_t lh, ls, lv;
     if(button)
-        lh= h[button],
-        ls= s[button],
-        lv= v[button];
+        lh= h[button-1],
+        ls= s[button-1],
+        lv= v[button-1];
 
     int16_t arelY= relY; //*2;
     //~ const int16_t scaling[][2]= { { 20, 2 }, { 40, 4 }, { 80, 6 }, { 160, 8 }, { 320, 20 } };
@@ -228,9 +236,9 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
         CLAMP(ls, 0, HSV_MAX);
     }
     if(button)
-        h[button]= lh,
-        s[button]= ls,
-        v[button]= lv;
+        h[button-1]= lh,
+        s[button-1]= ls,
+        v[button-1]= lv;
 
     setLEDsHSV(lh, ls, lv);
 
@@ -285,15 +293,16 @@ void tick(void)
     uint8_t buttons= buttonRead();
     if(buttons!=lastButtonState)
     {
-        printf("buttons: %d\n", buttons);
         if(buttons)
         {
-            int button= 0;
-            while(! (buttons & (1<<button)) )
-                ++button;
-            //~ printf("button %d pressed\n", button);
-            //~ printf("h: %ld s: %ld v: %ld\n", h[button], s[button], v[button]);
-            setLEDsHSV(h[button], s[button], v[button]);
+            uint8_t button= extractSingleButton(buttons);
+            if(button)
+            {
+                printf("button %d pressed\n", button);
+                setLEDsHSV(h[button-1], s[button-1], v[button-1]);
+            }
+            else
+                printf("multiple buttons\n");
         }
         else
         {
