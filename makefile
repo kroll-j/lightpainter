@@ -25,10 +25,9 @@ LD_FLAGS     =
 
 SERIAL:=$(wildcard /dev/ttyACM?)
 upload: all
-	echo reset > $(SERIAL); sleep .5
-	while ! stat $(SERIAL) >/dev/null ; do sleep .5; done
-	-avrdude -p m32u4 -c avr109 -P $(SERIAL) -U flash:w:$(TARGET).hex
-#	& (sleep 5; killall avrdude)
+	(echo; echo reset) > $(SERIAL); sleep 1
+	#~ while ! stat $(SERIAL) >/dev/null ; do sleep .5; done
+	-avrdude -p m32u4 -c avr109 -P $(SERIAL) -U flash:w:$(TARGET).hex & (sleep 6; killall avrdude)
 	-sleep 1; gtkterm -p $(wildcard /dev/ttyACM?) -s 115200
 
 # Default target

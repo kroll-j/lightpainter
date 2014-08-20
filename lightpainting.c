@@ -32,6 +32,14 @@
 #define RESET_PORT      PORTF
 #define RESET_PIN       4
 
+#define NBUTTONS        4
+
+#define TRANSITION_BITS 14
+#define TRANSITION_MAX  ((1<<TRANSITION_BITS)-1)
+
+#define min(a,b) ((a)<(b)? (a): (b))
+#define max(a,b) ((a)>(b)? (a): (b))
+
 //~ #define printf(x...)
 //~ #define puts(x...)
 
@@ -43,7 +51,7 @@ struct buttondesc
     uint8_t pin;
 };
 
-static const struct buttondesc buttons[]=
+static const struct buttondesc buttons[NBUTTONS]=
 {
     { &DDRB, &PORTB, &PINB, 4 },
     { &DDRE, &PORTE, &PINE, 6 },
@@ -57,14 +65,67 @@ struct preset
 };
 
 // color presets for each button
-struct preset presets[4]=
+struct preset presets[NBUTTONS]=
 {
-    { 0, HSV_MAX/2, HSV_MAX },
-    { 0, HSV_MAX/2, HSV_MAX },
-    { 0, HSV_MAX/2, HSV_MAX },
-    { 0, HSV_MAX/2, HSV_MAX },
+    { HSV_MAX*0/4, HSV_MAX, HSV_MAX },
+    { HSV_MAX*1/4, HSV_MAX, HSV_MAX },
+    { HSV_MAX*2/4, HSV_MAX, HSV_MAX },
+    { (uint32_t)HSV_MAX*3/4, HSV_MAX, HSV_MAX },
 };
 
+// transition settings
+struct transitionSetting
+{
+    uint16_t velocity;
+};
+volatile struct transitionSetting transitionSettings[NBUTTONS*NBUTTONS]=
+{
+    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
+    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
+    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
+    { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, { TRANSITION_MAX/100 }, 
+};
+
+// currently active transitions
+volatile struct
+{
+    uint8_t presetIndices[NBUTTONS];    // presets to lerp
+    uint8_t count;                      // number of presets
+    uint8_t index;                      // current index into presetIndices
+    uint16_t offset;                    // offset between two presets
+} activeTransitions;
+
+uint8_t getTransitionIndex(uint8_t buttonA, uint8_t buttonB)
+{
+    uint8_t a= buttonA&(NBUTTONS-1), b= buttonB&(NBUTTONS-1);
+    return min(a,b)*NBUTTONS + max(a,b);
+}
+
+void transitionReset(void)
+{
+    activeTransitions.count= activeTransitions.index= activeTransitions.offset= 0;
+}
+
+void transitionAdd(uint8_t preset)
+{
+    activeTransitions.count%= NBUTTONS;
+    activeTransitions.presetIndices[activeTransitions.count]= preset;
+    activeTransitions.count++;
+}
+
+void transitionRemove(uint8_t preset)
+{
+    for(int i= 0; i<activeTransitions.count; ++i)
+    {
+        if(activeTransitions.presetIndices[i]==preset)
+        {
+            for(int k= i+1; k<activeTransitions.count; ++k)
+                activeTransitions.presetIndices[k-1]= activeTransitions.presetIndices[k];
+            activeTransitions.count--;
+            break;
+        }
+    }
+}
 
 void buttonSetup(void)
 {
@@ -107,6 +168,29 @@ void touchpadInitADB(void)
     adbExecuteCommand(COM_LISTEN1, adbData, 7);
 }
 
+void statusLED(bool on)
+{
+    if(on)
+        PORTB&= ~(1<<0);
+    else
+        PORTB|= 1<<0;
+}
+
+// called every 10 timer ticks (~100x per sec)
+void lerpTransitions(void)
+{
+}
+
+ISR(TIMER1_OVF_vect)
+{
+    static volatile uint8_t countdown= 10;
+    if(!--countdown)
+    {
+        lerpTransitions();
+        countdown= 10;
+    }
+}
+
 // timer1: fast pwm mode
 //  OC1A: PB5=D9=RED
 //  OC1B: PB6=D10=GREEN
@@ -120,6 +204,7 @@ void setupPWM(void)
             (1<<CS10);                      // No Prescaling
     ICR1= RGB_MAX;                          // Timer TOP value, f=~976Hz
     DDRB|= (1<<5) | (1<<6);                 // Enable RED and GREEN outputs
+    TIMSK1= (1<<TOIE1);                     // Enable overflow interrupt
     
     TCCR3A= (1<<COM3A1) |                   // Clear OC3A on compare match, set OC3B at TOP
             (1<<WGM31);                     // Fast PWM
@@ -253,14 +338,6 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
         presets[button-1].v= lv;
 
     setLEDsHSV(lh, ls, lv);
-}
-
-void statusLED(bool on)
-{
-    if(on)
-        PORTB&= ~(1<<0);
-    else
-        PORTB|= 1<<0;
 }
 
 void setup(void)
