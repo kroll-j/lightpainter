@@ -51,6 +51,21 @@ static const struct buttondesc buttons[]=
     { &DDRD, &PORTD, &PIND, 0 },
 };
 
+struct preset
+{
+    int32_t h, s, v;
+};
+
+// color presets for each button
+struct preset presets[4]=
+{
+    { 0, HSV_MAX/2, HSV_MAX },
+    { 0, HSV_MAX/2, HSV_MAX },
+    { 0, HSV_MAX/2, HSV_MAX },
+    { 0, HSV_MAX/2, HSV_MAX },
+};
+
+
 void buttonSetup(void)
 {
     for(int i= 0; i<sizeof(buttons)/sizeof(buttons[0]); ++i)
@@ -186,9 +201,6 @@ uint8_t extractSingleButton(uint8_t mask)
     return button+1;
 }
 
-static int32_t h[4], 
-               s[4]= { HSV_MAX/2, HSV_MAX/2, HSV_MAX/2, HSV_MAX/2 },
-               v[4]= { HSV_MAX, HSV_MAX, HSV_MAX, HSV_MAX };
 
 void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX, uint16_t currentY, int16_t relX, int16_t relY, 
                 uint16_t pressure, uint8_t buttons, uint8_t isBegin, uint8_t isEnd)
@@ -200,16 +212,16 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
     if(isEnd && !buttons)
     {
         setLEDs(0,0,0);
-        return; ////////////////////
+        return;
     }
     
     uint8_t button= extractSingleButton(buttons);
     
     static int32_t lh, ls, lv;
     if(button)
-        lh= h[button-1],
-        ls= s[button-1],
-        lv= v[button-1];
+        lh= presets[button-1].h,
+        ls= presets[button-1].s,
+        lv= presets[button-1].v;
 
     int16_t arelY= relY; //*2;
     //~ const int16_t scaling[][2]= { { 20, 2 }, { 40, 4 }, { 80, 6 }, { 160, 8 }, { 320, 20 } };
@@ -236,14 +248,11 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
         CLAMP(ls, 0, HSV_MAX);
     }
     if(button)
-        h[button-1]= lh,
-        s[button-1]= ls,
-        v[button-1]= lv;
+        presets[button-1].h= lh,
+        presets[button-1].s= ls,
+        presets[button-1].v= lv;
 
     setLEDsHSV(lh, ls, lv);
-
-    //~ printf("h: %ld s: %ld v: %ld\n", h[button], s[button], v[button]);
-    //~ setLEDsHSV(h[button], s[button], v[button]);
 }
 
 void statusLED(bool on)
@@ -299,7 +308,7 @@ void tick(void)
             if(button)
             {
                 printf("button %d pressed\n", button);
-                setLEDsHSV(h[button-1], s[button-1], v[button-1]);
+                setLEDsHSV(presets[button-1].h, presets[button-1].s, presets[button-1].v);
             }
             else
                 printf("multiple buttons\n");
