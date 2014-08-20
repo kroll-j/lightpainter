@@ -145,7 +145,7 @@ void hsv2rgb(int h, int s, int v, uint16_t *dest)
     
     //~ if(v>HSV_MAX) v= HSV_MAX;      // Helligkeit innerhalb max. Werte halten
     //~ else if(v<0) v= 0;
-    CLAMP(v, 0, HSV_MAX*2);
+    CLAMP(v, 0, HSV_MAX);
     h&= HSV_MAX;                   // modulo mit max. Wert
     s= (HSV_MAX+1)-s;              // Saturation invertieren
     index= h / ((HSV_MAX+1)/6);    // index
@@ -193,18 +193,15 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
         return; ////////////////////
     }
     
-    //~ if(!buttons)
-    //~ {
-        //~ puts("drag action with buttons=0");
-        //~ return;
-    //~ }
-    
     int button= 0;
     while(buttons && !(buttons&(1<<button)) )
         ++button;
     
-    uint16_t rgb[3];
-    printf("relY: %d\n", relY);
+    static int32_t lh, ls, lv;
+    if(button)
+        lh= h[button],
+        ls= s[button],
+        lv= v[button];
 
     int16_t arelY= relY; //*2;
     //~ const int16_t scaling[][2]= { { 20, 2 }, { 40, 4 }, { 80, 6 }, { 160, 8 }, { 320, 20 } };
@@ -215,25 +212,30 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
     if(motionBeginX<BOUNDARY1)
     {
         // top region controls value (brightness)
-        v[button]+= arelY;
-        CLAMP(v[button], 0, HSV_MAX*2); // allow brightness up to 200%
+        lv+= arelY;
+        CLAMP(lv, 0, HSV_MAX*2); // allow brightness up to 200%
     }
     else if(motionBeginX<BOUNDARY2)
     {
         // middle region controls hue
-        h[button]+= arelY;
-        h[button]&= HSV_MAX;
+        lh+= arelY;
+        lh&= HSV_MAX;
     }
     else
     {
         // bottom region controls saturation
-        s[button]+= arelY;
-        CLAMP(s[button], 0, HSV_MAX);
+        ls+= arelY;
+        CLAMP(ls, 0, HSV_MAX);
     }
-    printf("h: %ld s: %ld v: %ld\n", h[button], s[button], v[button]);
-    //~ hsv2rgb(h[button], s[button], v[button], rgb);
-    //~ setLEDs(rgb[0], rgb[1], rgb[2]);
-    setLEDsHSV(h[button], s[button], v[button]);
+    if(button)
+        h[button]= lh,
+        s[button]= ls,
+        v[button]= lv;
+
+    setLEDsHSV(lh, ls, lv);
+
+    //~ printf("h: %ld s: %ld v: %ld\n", h[button], s[button], v[button]);
+    //~ setLEDsHSV(h[button], s[button], v[button]);
 }
 
 void statusLED(bool on)
