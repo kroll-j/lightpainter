@@ -7,7 +7,7 @@
 // B: 4.7 + 4.7 + 5.6 parallel
 // R: 8.2 + 10 parallel
 
-#define ADB_PIN     PB2     // pin number
+#define ADB_PIN     PB3     // pin number
 #define ADB_PINREG  PINB    // pin register
 #define ADB_PORT    PORTB   // port register
 #define ADB_PDIR    DDRB    // data direction register
@@ -41,8 +41,8 @@
 #define min(a,b) ((a)<(b)? (a): (b))
 #define max(a,b) ((a)>(b)? (a): (b))
 
-//~ #define printf(x...)
-//~ #define puts(x...)
+#define printf(x...)
+#define puts(x...)
 
 void setLEDs(int16_t r, int16_t g, int16_t b);
 void setLEDsHSV(uint16_t h, uint16_t s, uint16_t v);
@@ -195,10 +195,12 @@ void statusLED(bool on)
 
 uint16_t hueLerp(int32_t a, int32_t b, uint16_t offset)
 {
-    if(abs(b-a) > (1<<(TRANSITION_BITS-1)))
+    printf("a: %ld b: %ld b-a: %d threshold: %d\n", a, b, abs(b-a), 1<<(HSV_BITS-1));
+    if(abs(b-a) > (1<<(HSV_BITS-1)))
     {
-        if(a<b) a+= (1<<TRANSITION_BITS);
-        else b+= (1<<TRANSITION_BITS);
+        puts("lerp: inverting");
+        if(a<b) a+= (1<<HSV_BITS);
+        else b+= (1<<HSV_BITS);
     }
     return ILERP(a, b, offset, TRANSITION_BITS);
 }
@@ -380,7 +382,7 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
     {
         // top region controls value (brightness)
         lv+= arelY;
-        CLAMP(lv, 0, HSV_MAX*2); // allow brightness up to 200%
+        CLAMP(lv, 0, HSV_MAX);
     }
     else if(motionBeginX<BOUNDARY2)
     {
@@ -406,7 +408,7 @@ void dragAction(uint16_t motionBeginX, uint16_t motionBeginY, uint16_t currentX,
 void setup(void)
 {
     touchpadTimerSetup();
-    Delay_MS(100);  // wait a bit -- the touchpad seems to take a while to power up
+    Delay_MS(200);  // wait a bit -- the touchpad seems to take a while to power up
     touchpadInitADB();
     setupPWM();
     buttonSetup();
@@ -476,7 +478,10 @@ void tick(void)
     
     uint8_t adbData[8];
     struct adbAbsMode absData;
+    cli();
+    //~ touchpadInitADB();
     char res= adbPoll(adbData);
+    sei();
     if(res)
     {
         if(res<0)
